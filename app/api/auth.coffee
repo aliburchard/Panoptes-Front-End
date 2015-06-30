@@ -26,6 +26,9 @@ module.exports = new Model
   _bearerToken: ''
   _bearerRefreshTimeout: NaN
 
+  pending: false
+  current: null
+
   _getAuthToken: ->
     console?.log 'Getting auth token'
     makeHTTPRequest 'GET', config.host + "/?now=#{Date.now()}", null, 'Accept': 'text/html'
@@ -94,12 +97,22 @@ module.exports = new Model
 
   _getSession: ->
     console?.log 'Getting session'
+    @update pending: true
     client.get '/me'
       .then ([user]) =>
         console?.info 'Got session', user.login, user.id
+
+        unless user is @current
+          @update
+            pending: false
+            current: user
+
         user
 
-      .catch (error) ->
+      .catch (error) =>
+        @update
+          pending: false
+          current: null
         console?.error 'Failed to get session'
         throw error
 
@@ -243,6 +256,7 @@ module.exports = new Model
               @_deleteBearerToken()
               @update _currentUserPromise: Promise.resolve null
               console?.info 'Signed out'
+              @update current: null
               null
 
             .catch (request) ->

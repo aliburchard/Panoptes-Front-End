@@ -6,61 +6,58 @@ apiClient = require '../../api/client'
 counterpart = require 'counterpart'
 LandingPage = require './landing-page'
 
-RequiresSession = do ->
-  ChangeListener = require '../../components/change-listener'
-  auth = require '../../api/auth'
-  PromiseRenderer = require '../../components/promise-renderer'
-
-  React.createClass
-    displayName: 'RequiresSession'
-
-    render: ->
-      <ChangeListener target={auth} handler={@renderAuth} />
-
-    renderAuth: ->
-      <PromiseRenderer promise={auth.checkCurrent()} then={@renderUser} />
-
-    renderUser: (user) ->
-      if user?
-        @props.render user
-      else
-        <LandingPage user={user} parentIndex={this} />
-
-sleep = (duration) ->
-  (value) ->
-    new Promise (resolve) ->
-      setTimeout resolve.bind(null, value), duration
+ChangeListener = require '../../components/change-listener'
+auth = require '../../api/auth'
 
 module.exports = React.createClass
   displayName: 'LabIndex'
 
   mixins: [Navigation]
 
+  getDefaultProps: ->
+    query:
+      page: 1
+
   getInitialState: ->
-    page: 1
+    loading: false
     projects: []
     creationError: null
     creationInProgress: false
 
+  componentDidMount: ->
+    @fetchProjects @props.query.page
+
+  componentWillReceiveProps: (nextProps) ->
+    unless nextProps.query.page is @props.query.page
+      @fetchProjects nextProps.query.page
+
+  fetchProjects: (page = 1) ->
+    @setState loading: true
+
+    if auth.current?
+      query =
+        current_user_roles: ['owner', 'collaborator']
+        page: page
+
+      apiClient.type('projects').get(query).then (projects) =>
+        @setState
+          loading: false
+          projects: projects
+
+    else
+      @setState
+        loading: false
+        projects: []
+
   render: ->
-    <div>
-      <RequiresSession render={@renderWithSession} />
-    </div>
-
-  renderWithSession: (user) ->
-    # TODO: Make this a component instead of a function,
-    # then `user.uncacheLink 'projects'` on mount and on project creation.
-
-    getProjects = apiClient.type('projects').get current_user_roles: 'owner,collaborator', page: @state.page
-
-    <PromiseRenderer promise={getProjects} pending={null}>{(projects) =>
-      if projects.length > 0
+    if @state.loading or auth.pending
+      <p>Loading</p>
+    else if auth.current? and @state.projects.length isnt 0
         <div className="content-container">
-          {console.log('got projects')}
           <div>
             <table>
               <tbody>
-                {for project in projects then do (project) =>
+                {for project in @state.projects then do (project) =>
                   <tr key={project.id}>
                     <td>{project.display_name}</td>
                     <td><Link to="edit-project-details" params={projectID: project.id} className="minor-button"><i className="fa fa-pencil"></i> Edit</Link></td>
@@ -73,7 +70,7 @@ module.exports = React.createClass
               </tbody>
             </table>
 
-            {meta = projects[0]?.getMeta()
+            {meta = @state.projects[0]?.getMeta()
             if meta? and meta.page_count isnt 1
               <nav className="pagination">
                 <label>
@@ -89,7 +86,7 @@ module.exports = React.createClass
               </nav>}
           </div>
           <br />
-          <button className="standard-button" disabled={@state.creationInProgress} onClick={@createNewProject.bind this, user}>
+          <button className="standard-button" disabled={@state.creationInProgress} onClick={@createNewProject.bind this, auth.current}>
             Create a new project{' '}
             <LoadingIndicator off={not @state.creationInProgress} />
           </button>&nbsp;
@@ -99,12 +96,10 @@ module.exports = React.createClass
             <p className="form-help error">{@state.creationError.message}</p>}
         </div>
       else
-        <LandingPage user={user} parentIndex={this} />
-    }</PromiseRenderer>
+        <LandingPage user={auth.current} parentIndex={this} />
 
   handlePageChange: (e) ->
-    @setState page: e.target.value, =>
-      @forceUpdate()
+    @setState page: e.target.value
 
   createNewProject: (user) ->
     project = apiClient.type('projects').create
@@ -120,7 +115,6 @@ module.exports = React.createClass
     project.save()
       .catch (error) =>
         @setState creationError: error
-      .then sleep 1100 # Wait for the global request cache to clear (TODO: Cache should really expire on return).
       .then (project) =>
         # TODO: user.uncacheLink 'project'
         @setState creationInProgress: false

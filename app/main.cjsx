@@ -1,6 +1,7 @@
 React = require 'react'
 React.initializeTouchEvents true
 window.React = React
+auth = require './api/auth'
 Router = {RouteHandler, DefaultRoute, Route, NotFoundRoute} = require 'react-router'
 MainHeader = require './partials/main-header'
 MainFooter = require './partials/main-footer'
@@ -12,15 +13,37 @@ logDeployedCommit()
 App = React.createClass
   displayName: 'PanoptesApp'
 
+  getInitialState: ->
+    remounting: false
+
+  componentDidMount: ->
+    auth.listen 'change', @handleAuthChange
+
+  componentWillUnmount: ->
+    auth.stopListening 'change', @handleAuthChange
+
+  handleAuthChange: ->
+    unless auth.current is @state.currentUser
+      @setState remounting: true
+
   render: ->
-    <div className="panoptes-main">
-      <IOStatus />
-      <MainHeader />
-      <div className="main-content">
-        <RouteHandler {...@props} />
+    if @state.remounting
+      console?.log 'Remounting'
+      null
+    else
+      console?.log 'Rendering from the top'
+      <div className="panoptes-main">
+        <IOStatus />
+        <MainHeader />
+        <div className="main-content">
+          <RouteHandler {...@props} />
+        </div>
+        <MainFooter />
       </div>
-      <MainFooter />
-    </div>
+
+  componentDidUpdate: ->
+    if @state.remounting
+      @setState remounting: false
 
 routes = <Route handler={App}>
   <DefaultRoute name="home" handler={require './pages/home'} />
